@@ -83,14 +83,15 @@ class IntraClassLabeler:
             print(f"⚠️ Activity {activity_code}를 찾을 수 없습니다.")
             return
 
-        self.start_idx = indices[0]
-        self.end_idx   = indices[-1] + 1
-
-        # ✅ training 코드와 동일 채널 사용 (ankle acc: 5,6,7 / ankle gyro: 8,9,10)
-        X = data[self.start_idx:self.end_idx, 5:11].astype(np.float64)  # (N,6)
+        # =========================================================
+        # ✅ [핵심 수정] evaluation과 동일하게 "label==activity_code"만 추출
+        # - 기존: start~end slice (중간에 다른 라벨이 끼면 time축 불일치)
+        # - 수정: indices로 필터링해서 act-only 시퀀스 구성 (time축 압축 동일)
+        # =========================================================
+        X = data[indices, 5:11].astype(np.float64)  # (N_act, 6)
         self.raw = X.copy()
 
-        # (권장) segment 단위 z-normalize: 모델/탐지 정의와 더 안정적으로 맞음
+        # (권장) act-only 시퀀스 단위 z-normalize (evaluation과 동일한 방식)
         mean = X.mean(axis=0)
         std = X.std(axis=0) + 1e-9
         Xn = (X - mean) / std
@@ -104,6 +105,7 @@ class IntraClassLabeler:
         self.det = InvertedInertialDetector(fs=fs, scale_factor=SCALE_FACTOR, stability_threshold=STABILITY_THRESHOLD)
         self.score = self.det.detect(acc, gyro)
 
+        # ✅ act-only 시퀀스의 시간축 (evaluation과 동일한 "압축된" time)
         self.t = np.arange(len(Xn)) / fs
 
         # ----- Figure (2 subplots) -----
@@ -126,7 +128,7 @@ class IntraClassLabeler:
         print("\n" + "="*60)
         print("🎮 [라벨링 가이드: 지금은 'STABLE 구간'을 라벨링합니다]")
         print(" - 아래 그래프(stability score)가 threshold(점선) 위로 올라간 구간을 드래그하세요.")
-        print(" - 즉, '동작-동작 사이'에서 score가 높게 유지되는 구간(상대적으로 안정)을 선택.")
+        print(" - (중요) 현재 time축은 evaluation과 동일한 'act-only(압축) 시퀀스' 기준입니다.")
         print("\n[사용법]")
         print("1) 아래 score plot에서 마우스 드래그: stable 구간 추가")
         print("2) 키보드 'd': 최근 구간 삭제")
@@ -169,7 +171,7 @@ class IntraClassLabeler:
             self.ax1.axvspan(s, e, color='green', alpha=0.18)
             self.ax2.axvspan(s, e, color='green', alpha=0.18)
 
-        self.fig.suptitle(f"Subj {SUBJECT_ID} - Act {ACTIVITY_CODE} (Manual STABLE Labeling)", fontsize=14)
+        self.fig.suptitle(f"Subj {SUBJECT_ID} - Act {ACTIVITY_CODE} (Manual STABLE Labeling) [ACT-ONLY aligned]", fontsize=14)
         self.fig.tight_layout(rect=[0, 0, 1, 0.95])
         self.fig.canvas.draw_idle()
 
@@ -191,6 +193,7 @@ class IntraClassLabeler:
                     "fs": self.fs,
                     "activity_code": ACTIVITY_CODE,
                     "n_segments": len(self.segments),
+                    "sequence": "ACT-ONLY (label==activity_code) concatenated",  # ✅ 추가 메타(안전)
                     "detector": {
                         "scale_factor": SCALE_FACTOR,
                         "stability_threshold": STABILITY_THRESHOLD,
